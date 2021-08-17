@@ -21,10 +21,9 @@ def unscale_from_bounds(parameters: List[np.ndarray],
                         lower_bounds: Sequence[float],
                         upper_bounds: Sequence[float]) -> List[np.ndarray]:
     unscaled_parameters = copy.copy(parameters)
-    for i_par, par in enumerate(parameters):
-        unscaled_parameters[i_par] = \
-            par / (upper_bounds[i_par] - lower_bounds[i_par]) \
-            - lower_bounds[i_par]
+    for ip, par in enumerate(parameters):
+        unscaled_parameters[ip] = (par - lower_bounds[ip]) / \
+                                  (upper_bounds[ip] - lower_bounds[ip])
     return unscaled_parameters
 
 
@@ -55,10 +54,9 @@ def unscale_from_bounds_ensemble(
     n_parameters = len(lower_bounds)
     for par in parameters:
         unscaled_parameters.append(
-            np.array([par[i_par] / (upper_bounds[i_par] - lower_bounds[i_par])
-                      - lower_bounds[i_par]
-                      for i_par in range(n_parameters)
-                      ]).flatten()
+            np.array([(par[ip] - lower_bounds[ip]) /
+                      (upper_bounds[ip] - lower_bounds[ip])
+                      for ip in range(n_parameters)]).flatten()
         )
 
     return unscaled_parameters

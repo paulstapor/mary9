@@ -14,6 +14,6 @@ from .population import (
     Population,
 )
 
-from .initializer import (
-    Initializer,
+from .sampler import (
+    Sampler,
 )

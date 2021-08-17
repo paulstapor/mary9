@@ -123,7 +123,7 @@ class Population:
     def set_fitness(self, fitness):
         assert len(fitness) == self.popsize
         for ind, fit in zip(self.individuals, fitness):
-            ind.fitness = fitness
+            ind.fitness = fit
 
     def set_parameters(self, parameters):
         assert len(parameters) == self.popsize

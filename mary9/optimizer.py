@@ -3,8 +3,9 @@ from typing import Sequence, Callable, Dict
 import logging
 from scipy.optimize import OptimizeResult
 logger = logging.getLogger(__name__)
+logger.level = logging.INFO
 
-from .initializer import Initializer
+from .sampler import Sampler
 from .population import Population
 from .global_optimizers import CMAESWrapper, DiffEvolWrapper, InitialRefiner
 from .local_optimizers import FidesWrapper
@@ -36,6 +37,7 @@ class Mary9Optimizer:
         self.n_parameters = n_parameters
         self.local_solver_tolerance = local_solver_tolerance
         self.random_seed = random_seed
+        self.final_results = []
 
         if self.gradient_eval_equivalent is None:
             self.gradient_eval_equivalent = self.n_parameters
@@ -60,9 +62,7 @@ class Mary9Optimizer:
             self._perform_global_iteration(iter=i_iter)
             # self._store_global_iteration()
 
-        self._perform_final_search()
-
-        self._finish()
+        return self._perform_final_search()
         
     def _distribute_budget(self):
         # compute the overall budget for the optimizer
@@ -159,8 +159,8 @@ class Mary9Optimizer:
         # structure 20 + 160 + 20
         # --> 1 refinement each 5 global iterations
         
-        self.n_local_searches = np.round(
-            self.budgets['local'] / local_search_cost)
+        self.n_local_searches = int(np.round(
+            self.budgets['local'] / local_search_cost))
 
         self.budgets['sampling_CMAES'] = np.max(
             [int(np.round(self.budgets['total'] / 1000)),
@@ -183,7 +183,7 @@ class Mary9Optimizer:
         If those deliver good results, the populations of the global
         gradient-free optimizers are updated accordingly.
         """
-        initializer = Initializer(
+        sampler = Sampler(
             lower_bounds=self.lower_bounds,
             upper_bounds=self.upper_bounds,
             objective_function=self.objective_function,
@@ -196,7 +196,7 @@ class Mary9Optimizer:
             full_proposal_cmaes,
             fitness_cmaes,
             selection_info_cmaes
-        ) = initializer.sample_initial_points(
+        ) = sampler.sample_initial_points(
             n_samples=self.popsizes['CMAES'],
             random_seed=self.random_seed,
             strategy=(.1, .3, .6, .0),
@@ -217,7 +217,7 @@ class Mary9Optimizer:
             full_proposal_diffevol,
             fitness_diffevol,
             selection_info_diffevol
-        ) = initializer.sample_initial_points(
+        ) = sampler.sample_initial_points(
             n_samples=self.popsizes['DiffEvol'],
             random_seed=self.random_seed,
             strategy=(.1, .2, .2, .5),
@@ -340,10 +340,13 @@ class Mary9Optimizer:
 
     def _perform_global_iteration(self, iter):
 
+        logger.info(f'   - iteration {iter}...')
         if 'CMAES' in self.iterations[iter]:
+            logger.info('     - running CMAES...')
             next(self.cmaes_optimizer)
             # Now update the populations of other optimization algorithms
             if 'DiffEvol' in self.iterations[iter]:
+                logger.info('     - sharing points with DiffEvol...')
                 n_update_points = int(min([np.round(
                     .05 * self.cmaes_optimizer.population.popsize), 5]))
                 self._share_knowledge(
@@ -355,10 +358,12 @@ class Mary9Optimizer:
                 )
 
         if 'DiffEvol' in self.iterations[iter]:
+            logger.info('     - running DiffEvol...')
             next(self.diffevol_optimizer)
             # Now update the populations of other optimization algorithms
             n_update_points = int(min([np.round(
                 .05 * self.diffevol_optimizer.population.popsize), 5]))
+            logger.info('     - sharing points with CMAES...')
             self._share_knowledge(
                 update_from=self.diffevol_optimizer.population,
                 update_to=self.cmaes_optimizer.population,
@@ -368,7 +373,9 @@ class Mary9Optimizer:
             )
 
         if 'InitialRefine' in self.iterations[iter]:
+            logger.info('     - running initial refinements for CMAES...')
             self.initial_refiner_cmaes.run()
+            logger.info('     - sharing points with CMAES...')
             self._share_knowledge(
                 update_from=self.initial_refiner_cmaes.population,
                 update_to=self.cmaes_optimizer.population,
@@ -378,7 +385,9 @@ class Mary9Optimizer:
                 update_threshold='in between'
             )
 
+            logger.info('     - running initial refinements for DiffEvol...')
             self.initial_refiner_diffevol.run()
+            logger.info('     - sharing points with DiffEvol...')
             self._share_knowledge(
                 update_from=self.initial_refiner_diffevol.population,
                 update_to=self.diffevol_optimizer.population,
@@ -389,11 +398,12 @@ class Mary9Optimizer:
             )
 
         if 'RuntimeRefine' in self.iterations[iter]:
+            logger.info('     - running local refinements...')
             whole_population = Population.merge_populations(
                 [self.cmaes_optimizer.population,
                  self.diffevol_optimizer.population]
             )
-            refinement_points, selection_info = Initializer.select_subsample(
+            refinement_points, selection_info = Sampler.select_subsample(
                 proposal=whole_population,
                 n_samples=self.popsizes['runtime_refinements'][
                     self.refinements_run],
@@ -439,7 +449,7 @@ class Mary9Optimizer:
     ):
         # select best points from new population
         suggested_points, selection_info = \
-            Initializer.select_subsample(
+            Sampler.select_subsample(
                 proposal=update_from,
                 n_samples=update_popsize,
                 strategy=update_strategy, #(.2, .2, .6, .0),
@@ -448,7 +458,7 @@ class Mary9Optimizer:
 
         # Now select weakest point from old population
         weakest_inds, info_weakest = \
-            Initializer.select_weakest_sample(
+            Sampler.select_weakest_sample(
                 proposal=update_to,
                 n_samples=update_popsize,
             )
@@ -481,20 +491,28 @@ class Mary9Optimizer:
             [self.diffevol_optimizer.population,
              self.cmaes_optimizer.population]
         )
-        final_search_points, selection_info = Initializer.select_subsample(
+        final_search_points, selection_info = Sampler.select_subsample(
             proposal=whole_population,
             n_samples=self.n_local_searches,
             strategy=(.3, .3, .3, .1),
             ban_distance=.1 / whole_population.popsize
         )
+
         final_results = []
+        final_fvals = []
         for id, point in enumerate(final_search_points):
             # run Fides
             point = rescale_to_bounds(point,
                                       lower_bounds=self.lower_bounds,
                                       upper_bounds=self.upper_bounds)
-            final_results.append(self.final_local_optimizer.minimize(
+            tmp_result = self.final_local_optimizer.minimize(
                 objective_function=self.objective_function,
                 x0=point,
                 id=str(id)
-            ))
+            )
+            final_fvals.append(tmp_result.fval)
+            final_results.append(tmp_result)
+
+        ordering = np.argsort(np.array(final_fvals))
+        for ord in ordering:
+            self.final_results.append(final_results[ord])

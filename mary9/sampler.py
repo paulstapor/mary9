@@ -10,7 +10,7 @@ from .util import rescale_to_bounds_ensemble
 logger = logging.getLogger(__name__)
 
 
-class Initializer:
+class Sampler:
 
     def __init__(
             self,
@@ -20,7 +20,7 @@ class Initializer:
             n_parameters: int = None,
     ):
         """
-        The Initializer class aims at creating a good proposal/population of
+        The Sampler class aims at creating a good proposal/population of
         parameter vectors (list of ndarray) for global optimization methods
         (i.e., either multi-start local or hybrid global-local methods.)
 
@@ -66,7 +66,7 @@ class Initializer:
     ]:
         """
         This method creates initial guesses for optimization procedures, for a
-        Mary9 Initializer object. It creates a large proposal of parameter
+        Mary9 Sampler object. It creates a large proposal of parameter
         vectors via latin hypercube sampling and then selects a subsample based
         on a chosen strategy.
 
@@ -133,7 +133,7 @@ class Initializer:
         if strategy == 'LHS':
             assert n_samples == sampling_budget
 
-        proposal = Initializer.sample_LHS(
+        proposal = Sampler.sample_LHS(
             n_samples=sampling_budget,
             lower_bounds=self.lower_bounds,
             upper_bounds=self.upper_bounds,
@@ -217,7 +217,7 @@ class Initializer:
 
         # gives names to the different proportion parts
         (fitness_proportion, diversity_proportion, balanced_proportion,
-         mixed_proportion) = Initializer._handle_strategy(strategy=strategy,
+         mixed_proportion) = Sampler._handle_strategy(strategy=strategy,
                                                           n_samples=n_samples)
 
         if ban_distance is None:
@@ -234,7 +234,7 @@ class Initializer:
 
         # first, we select the fittest samples accoding to fitness_proportion
         fittest_indices, fittest_samples, banned_indices = \
-            Initializer._select_fittest_samples(
+            Sampler._select_fittest_samples(
                 proposal=proposal,
                 n_fittest_samples=n_fittest_samples,
                 ban_distance=ban_distance
@@ -242,7 +242,7 @@ class Initializer:
 
         # then we select those samples which should be as diverse as possible
         diverse_indices, diverse_samples, banned_indices = \
-            Initializer._select_diverse_samples(
+            Sampler._select_diverse_samples(
                 proposal=proposal,
                 fittest_indices=fittest_indices,
                 banned_indices=banned_indices,
@@ -251,7 +251,7 @@ class Initializer:
             )
 
         balanced_indices, balanced_samples, banned_indices = \
-            Initializer._select_balanced_samples(
+            Sampler._select_balanced_samples(
                 proposal=proposal,
                 fittest_indices=fittest_indices,
                 diverse_indices=diverse_indices,
@@ -261,7 +261,7 @@ class Initializer:
             )
 
         mixed_indices, mixed_samples, banned_indices = \
-            Initializer._select_mixed_samples(
+            Sampler._select_mixed_samples(
                 proposal=proposal,
                 fittest_indices=fittest_indices,
                 diverse_indices=diverse_indices,
@@ -300,12 +300,24 @@ class Initializer:
             n_samples: int,
     ) -> Tuple[List[np.ndarray], Dict]:
         """
-        Method for selecting a good proposal of points from a larger LHS sample
+        Method for selecting a poor proposal of points from population.
+        When exchanging points between optimizers, our aim will be to replace
+        the weakest point from one optimizer with the best points from another
+        optimizer. Choosing good points is somewhat straight forward.
+        For choosing weak points, this method uses the following logic:
+         - Never replace the best 25% of points in terms of fitness
+           [stored in the list "dont_touch"]
+         - Never replace the most diverse 25% of points
+           [stored in the list "dont_touch"]
+         - Now create a mixed ranking across all point, and select the weakest
+           ones according to this mixed ranking (i.e., poor fitness and
+           diversity), and fill the list of weak points one-by-one, omitting
+           those point which may not be touched.
 
         :param proposal:
             Proposal distribution drawn via LHS to select points from
         :param n_samples:
-            Number f startpoints to be seelcted from larger sample
+            Number f startpoints to be selected from larger sample
 
         :return weak_sample:
             List of parameter vectors (ndarrays)
@@ -323,9 +335,9 @@ class Initializer:
         sorted_fitness = np.argsort(fitness)
         ranking_fitness = np.argsort(np.argsort(fitness))
         sorted_diversity = np.argsort(diversity)[::-1]
-        ranking_diversity = np.argsort(np.argsort(diversity)[::-1])
-        ranking_summed = -ranking_diversity - ranking_fitness
-        inverse_sorted_mixed = np.argosrt(ranking_summed)[::-1]
+        ranking_diversity = np.argsort(np.argsort(diversity))[::-1]
+        ranking_summed = ranking_diversity + ranking_fitness
+        inverse_sorted_mixed = np.argsort(ranking_summed)[::-1]
 
         n_best = int(np.round(.25 * popsize))
         best_fitness = sorted_fitness[:n_best]
@@ -334,9 +346,9 @@ class Initializer:
                       if ind in best_fitness or ind in best_diversity]
 
         candidates = []
-        for i_sample in range(n_samples):
-            if inverse_sorted_mixed[i_sample] not in dont_touch:
-                candidates.append(inverse_sorted_mixed[i_sample])
+        for sample in inverse_sorted_mixed:
+            if sample not in dont_touch:
+                candidates.append(sample)
 
             if len(candidates) == n_samples:
                 return candidates, {}
@@ -434,9 +446,10 @@ class Initializer:
                                         for ind in new_banned_indices])
 
             if remaining_inds.size == 0:
-                warn("No samples left to select from. Returning a smaller "
-                     "population than intended, as too many samples have been "
-                     "banned.")
+                total_samples = len(fittest_indices)
+                warn("No samples left to select from. Returning a popoulation "
+                     f"with only {total_samples} samples, as too many samples "
+                     "have been banned.", RuntimeWarning)
                 break
 
         return (
@@ -497,9 +510,10 @@ class Initializer:
                                         for ind in new_banned_indices])
 
             if remaining_inds.size == 0:
-                warn("No samples left to select from. Returning a smaller "
-                     "population than intended, as too many samples have been "
-                     "banned.")
+                total_samples = len(fittest_indices + diverse_indices)
+                warn("No samples left to select from. Returning a popoulation "
+                     f"with only {total_samples} samples, as too many samples "
+                     "have been banned.", RuntimeWarning)
                 break
 
         diverse_samples = [proposal[ind] for ind in diverse_indices]
@@ -579,9 +593,11 @@ class Initializer:
                                         for ind in new_banned_indices])
 
             if remaining_inds.size == 0:
-                warn("No samples left to select from. Returning a smaller "
-                     "population than intended, as too many samples have been "
-                     "banned.")
+                total_samples = len(fittest_indices + diverse_indices +
+                                    balanced_indices)
+                warn("No samples left to select from. Returning a popoulation "
+                     f"with only {total_samples} samples, as too many samples "
+                     "have been banned.", RuntimeWarning)
                 break
 
         balanced_samples = [proposal[ind] for ind in balanced_indices]
@@ -623,7 +639,7 @@ class Initializer:
             # compute cummulated distance of points
             tmp_diversity = np.sum(remaining_matrix[accepted_inds, :], axis=0)
             # Now rank the samples by diversity...
-            ranking_diversity = np.argsort(np.argsort(tmp_diversity)[::-1])
+            ranking_diversity = np.argsort(np.argsort(tmp_diversity))[::-1]
             # ...and rank them by fitness as well
             tmp_fitness = fitness[remaining_inds]
             ranking_fitness = np.argsort(np.argsort(tmp_fitness))
@@ -651,9 +667,11 @@ class Initializer:
                                         for ind in new_banned_indices])
 
             if remaining_inds.size == 0:
-                warn("No samples left to select from. Returning a smaller "
-                     "population than intended, as too many samples have been "
-                     "banned.")
+                total_samples = len(fittest_indices + diverse_indices +
+                                    balanced_indices + mixed_indices)
+                warn("No samples left to select from. Returning a popoulation "
+                     f"with only {total_samples} samples, as too many samples "
+                     "have been banned.", RuntimeWarning)
                 break
 
         mixed_samples = [proposal[ind] for ind in mixed_indices]

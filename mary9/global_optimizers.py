@@ -76,13 +76,6 @@ class DiffEvolWrapper:
             init=np.array(population.get_parameters())
         )
 
-        # T.B.D.!!!
-
-        # The population may have just been initialized (all entries are
-        # np.inf). If it has you have to calculate the initial energies.
-        # Although this is also done in the evolve generator it's possible
-        # that someone can set maxiter=0, at which point we still want the
-        # initial energies to be calculated (the following loop isn't run).
         self.solver.feasible = np.array([True] * population.popsize)
         self.solver.population_energies = np.array(
             self.population.get_fitness())
@@ -90,6 +83,8 @@ class DiffEvolWrapper:
 
     def __next__(self):
         next(self.solver)
+        self.population.set_parameters(list(self.solver.population))
+        self.population.set_fitness(list(self.solver.population_energies))
 
 
 class InitialRefiner:
