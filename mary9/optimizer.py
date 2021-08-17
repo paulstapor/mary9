@@ -1,9 +1,7 @@
 import numpy as np
-from typing import Sequence, Callable, Dict
+from typing import Callable, Dict, Union
 import logging
 from scipy.optimize import OptimizeResult
-logger = logging.getLogger(__name__)
-logger.level = logging.INFO
 
 from .sampler import Sampler
 from .population import Population
@@ -24,27 +22,45 @@ class Mary9Optimizer:
                  upper_bounds: np.ndarray = None,
                  n_parameters: int = None,
                  local_solver_tolerance: float = None,
+                 logging_level: Dict = None,
                  random_seed: int = 0,
     ):
 
+        assert len(lower_bounds) == len(upper_bounds)
+        self.lower_bounds = lower_bounds
+        self.upper_bounds = upper_bounds
+        if n_parameters is None:
+            n_parameters = len(lower_bounds)
+        self.n_parameters = n_parameters
+
         self.objective_function = objective_function
+        self.max_fevals = max_fevals
         self.n_equivalent_multi_starts = n_equivalent_multi_starts
         self.local_search_equivalent = local_search_equivalent
         self.gradient_eval_equivalent = gradient_eval_equivalent
-        self.max_fevals = max_fevals
-        self.lower_bounds = lower_bounds
-        self.upper_bounds = upper_bounds
-        self.n_parameters = n_parameters
-        self.local_solver_tolerance = local_solver_tolerance
-        self.random_seed = random_seed
-        self.final_results = []
-
         if self.gradient_eval_equivalent is None:
             self.gradient_eval_equivalent = self.n_parameters
 
-        self.refinements_run = 0
+        self.local_solver_tolerance = local_solver_tolerance
+        self.random_seed = random_seed
 
-        # self._check_consistency()
+        if logging_level is None:
+            self.logging_levels = {'global': logging.WARN,
+                                   'local': logging.WARN,
+                                   'mary9': logging.DEBUG}
+            self.logger = logging.getLogger(__name__)
+            self.logger.setLevel(self.logging_levels['mary9'])
+            logFormatter = logging.Formatter(
+                "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  "
+                "%(message)s")
+            consoleHandler = logging.StreamHandler()
+            consoleHandler.setFormatter(logFormatter)
+            self.logger.addHandler(consoleHandler)
+
+        self.final_results = []
+
+
+        self.refinements_run = 0
 
     def minimize(self) -> OptimizeResult:
         # compute sizes of populations
@@ -62,7 +78,9 @@ class Mary9Optimizer:
             self._perform_global_iteration(iter=i_iter)
             # self._store_global_iteration()
 
-        return self._perform_final_search()
+        self._perform_final_search()
+
+        return self.final_results, self.final_population,
         
     def _distribute_budget(self):
         # compute the overall budget for the optimizer
@@ -331,22 +349,24 @@ class Mary9Optimizer:
             lower_bounds=self.lower_bounds.flatten(),
             upper_bounds=self.upper_bounds.flatten(),
             options={'maxiter': 50},
+            logging_level=self.logging_levels['local'],
         )
         self.final_local_optimizer = FidesWrapper(
             lower_bounds=self.lower_bounds.flatten(),
             upper_bounds=self.upper_bounds.flatten(),
             options={'maxiter': 1000},
+            logging_level=self.logging_levels['local'],
         )
 
     def _perform_global_iteration(self, iter):
 
-        logger.info(f'   - iteration {iter}...')
+        self.logger.info(f'   - iteration {iter}...')
         if 'CMAES' in self.iterations[iter]:
-            logger.info('     - running CMAES...')
+            self.logger.info('     - running CMAES...')
             next(self.cmaes_optimizer)
             # Now update the populations of other optimization algorithms
             if 'DiffEvol' in self.iterations[iter]:
-                logger.info('     - sharing points with DiffEvol...')
+                self.logger.debug('     - sharing points with DiffEvol...')
                 n_update_points = int(min([np.round(
                     .05 * self.cmaes_optimizer.population.popsize), 5]))
                 self._share_knowledge(
@@ -354,28 +374,28 @@ class Mary9Optimizer:
                     update_to=self.diffevol_optimizer.population,
                     update_popsize=n_update_points,
                     update_strategy=(.6, .0, .0, .4),
-                    update_threshold='only best'
+                    update_threshold='in between'
                 )
 
         if 'DiffEvol' in self.iterations[iter]:
-            logger.info('     - running DiffEvol...')
+            self.logger.info('     - running DiffEvol...')
             next(self.diffevol_optimizer)
             # Now update the populations of other optimization algorithms
             n_update_points = int(min([np.round(
                 .05 * self.diffevol_optimizer.population.popsize), 5]))
-            logger.info('     - sharing points with CMAES...')
+            self.logger.debug('     - sharing points with CMAES...')
             self._share_knowledge(
                 update_from=self.diffevol_optimizer.population,
                 update_to=self.cmaes_optimizer.population,
                 update_popsize=n_update_points,
                 update_strategy=(.6, .0, .0, .4),
-                update_threshold='only best'
+                update_threshold='in between'
             )
 
         if 'InitialRefine' in self.iterations[iter]:
-            logger.info('     - running initial refinements for CMAES...')
+            self.logger.info('     - running initial refinements for CMAES...')
             self.initial_refiner_cmaes.run()
-            logger.info('     - sharing points with CMAES...')
+            self.logger.debug('     - sharing points with CMAES...')
             self._share_knowledge(
                 update_from=self.initial_refiner_cmaes.population,
                 update_to=self.cmaes_optimizer.population,
@@ -385,9 +405,9 @@ class Mary9Optimizer:
                 update_threshold='in between'
             )
 
-            logger.info('     - running initial refinements for DiffEvol...')
+            self.logger.info('     - running initial refinements for DiffEvol...')
             self.initial_refiner_diffevol.run()
-            logger.info('     - sharing points with DiffEvol...')
+            self.logger.debug('     - sharing points with DiffEvol...')
             self._share_knowledge(
                 update_from=self.initial_refiner_diffevol.population,
                 update_to=self.diffevol_optimizer.population,
@@ -398,7 +418,7 @@ class Mary9Optimizer:
             )
 
         if 'RuntimeRefine' in self.iterations[iter]:
-            logger.info('     - running local refinements...')
+            self.logger.info('     - running local refinements...')
             whole_population = Population.merge_populations(
                 [self.cmaes_optimizer.population,
                  self.diffevol_optimizer.population]
@@ -465,6 +485,8 @@ class Mary9Optimizer:
 
         # Now try to exchange points, if possible
         fittest_old = np.nanmin(update_to.get_fitness())
+        good_value_old = np.nanpercentile(update_to.get_fitness(), q=5)
+        points_exchanged = 0
         for i_vector, _ in enumerate(suggested_points):
             # get the proposed new point
             id_new = selection_info['chosen'][i_vector]
@@ -479,23 +501,27 @@ class Mary9Optimizer:
             elif update_threshold == 'always if better':
                 threshold = individual_old.fitness
             elif update_threshold == 'in between':
-                threshold = .5 * fittest_old + .5 * individual_old.fitness
+                threshold = good_value_old
             else:
                 raise Exception('Unknown thresholding for knowledge exchange.')
             if individual_new.fitness < threshold:
                 update_to.individuals[id_old] = individual_new
+                points_exchanged += 1
+
+        self.logger.debug(f'  Exchanged {points_exchanged} of '
+                          f'{update_popsize} possible points.')
 
     def _perform_final_search(self):
 
-        whole_population = Population.merge_populations(
+        self.final_population = Population.merge_populations(
             [self.diffevol_optimizer.population,
              self.cmaes_optimizer.population]
         )
         final_search_points, selection_info = Sampler.select_subsample(
-            proposal=whole_population,
+            proposal=self.final_population,
             n_samples=self.n_local_searches,
             strategy=(.3, .3, .3, .1),
-            ban_distance=.1 / whole_population.popsize
+            ban_distance=.1 / self.final_population.popsize
         )
 
         final_results = []

@@ -23,4 +23,4 @@ optimizer = Mary9Optimizer(objective_function=rosenbrock,
                            lower_bounds=lb,
                            upper_bounds=ub,
                            n_parameters=14)
-results = optimizer.minimize()
+results, population = optimizer.minimize()

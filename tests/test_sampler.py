@@ -1,9 +1,7 @@
 import pytest
 import numpy as np
-import warnings
-import re
 
-from mary9 import Initializer, Population
+from mary9 import Sampler, Population
 
 
 @pytest.fixture
@@ -74,19 +72,19 @@ def small_population():
 
 
 def test_select_weakest_subsample(small_population):
-    weakest_3, info_3 = Initializer.select_weakest_sample(
+    weakest_3, info_3 = Sampler.select_weakest_sample(
         proposal=small_population, n_samples=3)
     assert weakest_3 == [1, 5, 8]
 
-    weakest_4, info_4 = Initializer.select_weakest_sample(
+    weakest_4, info_4 = Sampler.select_weakest_sample(
         proposal=small_population, n_samples=4)
     assert weakest_4 == [1, 5, 8, 6]
 
-    weakest_5, info_5 = Initializer.select_weakest_sample(
+    weakest_5, info_5 = Sampler.select_weakest_sample(
         proposal=small_population, n_samples=5)
     assert weakest_5 == [1, 5, 8, 6, 4]
 
-    weakest_6, info_6 = Initializer.select_weakest_sample(
+    weakest_6, info_6 = Sampler.select_weakest_sample(
         proposal=small_population, n_samples=6)
     assert weakest_6 == [1, 5, 8, 6, 4, 7]
 
@@ -97,7 +95,7 @@ def test_select_subsample(small_population):
 
 def test_sample_initial_points(objective, bounds, strategies, ban_distances):
     lower_bounds, upper_bounds = bounds
-    initializer = Initializer(
+    initializer = Sampler(
         lower_bounds=lower_bounds,
         upper_bounds=upper_bounds,
         objective_function=objective,
@@ -125,7 +123,7 @@ def test_sample_initial_points(objective, bounds, strategies, ban_distances):
 
 def test_sample_initial_points_many_bans(objective, bounds, strategies):
     lower_bounds, upper_bounds = bounds
-    initializer = Initializer(
+    initializer = Sampler(
         lower_bounds=lower_bounds,
         upper_bounds=upper_bounds,
         objective_function=objective,
@@ -156,7 +154,7 @@ def test_sample_initial_points_many_bans(objective, bounds, strategies):
 
 def test_sample_initial_points_lhs(bounds, objective):
     lower_bounds, upper_bounds = bounds
-    initializer = Initializer(
+    initializer = Sampler(
         lower_bounds=lower_bounds,
         upper_bounds=upper_bounds,
         objective_function=objective,

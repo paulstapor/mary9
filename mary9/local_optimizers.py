@@ -1,5 +1,6 @@
 import numpy as np
 import fides
+import logging
 from fides.hessian_approximation import BFGS as BFGS
 from typing import Dict, Optional, Callable
 from scipy.optimize import OptimizeResult
@@ -17,6 +18,7 @@ class FidesWrapper:
             upper_bounds: np.ndarray,
             hessian_update: Optional['fides.HessianApproximation'] = 'BFGS',
             options: Optional[Dict] = None,
+            logging_level: int = logging.WARN
     ):
         """
         Parameters
@@ -38,6 +40,7 @@ class FidesWrapper:
         self.upper_bounds = upper_bounds
         self.options = options
         self.hessian_update = hessian_update
+        self.logging_level = logging_level
 
     def minimize(
             self,
@@ -61,6 +64,7 @@ class FidesWrapper:
             ub=self.upper_bounds,
             lb=self.lower_bounds,
             hessian_update=BFGS(),
+            verbose=self.logging_level,
             options=self.options
         )
 

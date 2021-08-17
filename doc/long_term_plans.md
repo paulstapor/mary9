@@ -1,6 +1,5 @@
 # To Do
 
-- initializer -> sampler
 - improve logging
 - improve doc
 - add verbose mode
