@@ -9,7 +9,7 @@ the exploration capacities of gradient-free, global optimization algorithms and
 the (typically superior) exploitation possibilities of gradient-based, 
 (multi-start) local optimization approaches. Mary9 is supposed to work similar 
 to the [MATLAB-based hybrid global-local optimization toolbox 
-MEIGO](http://gingproc.iim.csic.es/meigo.html "MEIGO toolbox""), but 
+MEIGO](http://gingproc.iim.csic.es/meigo.html "MEIGO toolbox"), but 
 implements some additional ideas, such as the concept of 
 [hyper-heuristics](https://link.springer.com/article/10.1007/s11227-019-02871-0
 "Research paper on hyper-heuristics"),
