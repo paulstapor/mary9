@@ -2,6 +2,7 @@ import numpy as np
 from typing import Callable, Dict, Union
 import logging
 from scipy.optimize import OptimizeResult
+from copy import deepcopy
 
 from .sampler import Sampler
 from .population import Population
@@ -101,9 +102,9 @@ class Mary9Optimizer:
         self.popsizes = {}
         self.n_iterations = {}
 
-        self.budgets['CMAES'] = int(np.round(.5 * self.budgets['global']))
+        self.budgets['CMAES'] = int(np.round(.4 * self.budgets['global']))
         self.budgets['DiffEvol'] = \
-            int(self.budgets['global'] - np.round(.5 * self.budgets['global']))
+            int(self.budgets['global'] - np.round(.4 * self.budgets['global']))
         self.n_refinements = \
             int(np.round(self.budgets['refinement'] / refinement_cost))
         # CMAES uses (popsize + 1) * n_iter evaluations at most
@@ -116,8 +117,8 @@ class Mary9Optimizer:
         # (just the number same as for a local optimization)
         lb_popsize_CMAES = np.max([2 * self.n_equivalent_multi_starts,
                                    np.ceil(1.5 * self.n_parameters)])
-        lb_iterations_CMAES = 100
-        max_iter_CMAES = 1000
+        lb_iterations_CMAES = 50
+        max_iter_CMAES = 500
         popsize_CMAES = np.floor(self.budgets['CMAES'] / max_iter_CMAES) - 1
         if popsize_CMAES > lb_popsize_CMAES:
             self.popsizes['CMAES'] = int(popsize_CMAES)
@@ -132,8 +133,8 @@ class Mary9Optimizer:
 
 
         lb_popsize_DE = 2 * self.n_equivalent_multi_starts
-        lb_iterations_DiffEvol = 40
-        max_iter_DE = 200
+        lb_iterations_DiffEvol = 25
+        max_iter_DE = 150
         popsize_DiffEvol = np.floor(self.budgets['DiffEvol'] / max_iter_DE) - 1
         if popsize_DiffEvol > lb_popsize_DE:
             self.popsizes['DiffEvol'] = int(popsize_DiffEvol)
@@ -146,8 +147,8 @@ class Mary9Optimizer:
             self.popsizes['DiffEvol'] = int(lb_iterations_DiffEvol)
             self.n_iterations['DiffEvol'] = int(n_iter_DE)
 
-        self.popsizes['initial_refinements'] = \
-            int(np.round(.25 * self.n_refinements))
+        self.popsizes['initial_refinements'] = int(
+            np.round(.1 * self.budgets['global'] / refinement_cost))
         n_runtime_refinements = self.n_refinements - \
                                 self.popsizes['initial_refinements']
         n_runtime_refinements = np.linspace(0, n_runtime_refinements, 4)
@@ -322,7 +323,7 @@ class Mary9Optimizer:
         calls_to_DiffEvol = [int(iter) for iter in calls_to_DiffEvol]
 
         calls_to_InitialRefine = (
-            int(np.round(0.1 * self.n_iterations['global'])),)
+            int(np.round(0.05 * self.n_iterations['global'])),)
         calls_to_RuntimeRefine = (
             int(np.round(0.3 * self.n_iterations['global'])),
             int(np.round(0.5 * self.n_iterations['global'])),
@@ -365,7 +366,9 @@ class Mary9Optimizer:
             self.logger.info('     - running CMAES...')
             next(self.cmaes_optimizer)
             # Now update the populations of other optimization algorithms
-            if 'DiffEvol' in self.iterations[iter]:
+            if 'DiffEvol' in self.iterations[iter] and iter > 0:
+                self.logger.debug(f'     - best point CMAES: {np.nanmin(self.cmaes_optimizer.population.get_fitness())}')
+                self.logger.debug(f'     - best point DiffEvol: {np.nanmin(self.diffevol_optimizer.population.get_fitness())}')
                 self.logger.debug('     - sharing points with DiffEvol...')
                 n_update_points = int(min([np.round(
                     .05 * self.cmaes_optimizer.population.popsize), 5]))
@@ -376,10 +379,19 @@ class Mary9Optimizer:
                     update_strategy=(.6, .0, .0, .4),
                     update_threshold='in between'
                 )
+                self.logger.debug(
+                    f'     - best point CMAES: {np.nanmin(self.cmaes_optimizer.population.get_fitness())}')
+                self.logger.debug(
+                    f'     - best point DiffEvol: {np.nanmin(self.diffevol_optimizer.population.get_fitness())}')
+                # TODO: Need to call "promote_lowest_energy" in DiffEvol here!
 
         if 'DiffEvol' in self.iterations[iter]:
             self.logger.info('     - running DiffEvol...')
             next(self.diffevol_optimizer)
+            self.logger.debug(
+                f'     - best point CMAES: {np.nanmin(self.cmaes_optimizer.population.get_fitness())}')
+            self.logger.debug(
+                f'     - best point DiffEvol: {np.nanmin(self.diffevol_optimizer.population.get_fitness())}')
             # Now update the populations of other optimization algorithms
             n_update_points = int(min([np.round(
                 .05 * self.diffevol_optimizer.population.popsize), 5]))
@@ -391,6 +403,11 @@ class Mary9Optimizer:
                 update_strategy=(.6, .0, .0, .4),
                 update_threshold='in between'
             )
+            self.logger.debug(
+                f'     - best point CMAES: {np.nanmin(self.cmaes_optimizer.population.get_fitness())}')
+            self.logger.debug(
+                f'     - best point DiffEvol: {np.nanmin(self.diffevol_optimizer.population.get_fitness())}')
+            print('')
 
         if 'InitialRefine' in self.iterations[iter]:
             self.logger.info('     - running initial refinements for CMAES...')
@@ -402,7 +419,8 @@ class Mary9Optimizer:
                 update_popsize=int(
                     np.round(.2 * self.cmaes_optimizer.population.popsize)),
                 update_strategy=(.3, .2, .5, .0),
-                update_threshold='in between'
+                update_threshold='in between',
+                only_if_new_best_point=False
             )
 
             self.logger.info('     - running initial refinements for DiffEvol...')
@@ -414,7 +432,8 @@ class Mary9Optimizer:
                 update_popsize=int(
                     np.round(.2 * self.diffevol_optimizer.population.popsize)),
                 update_strategy=(.15, .15, .0, .7),
-                update_threshold='in between'
+                update_threshold='in between',
+                only_if_new_best_point=False
             )
 
         if 'RuntimeRefine' in self.iterations[iter]:
@@ -465,15 +484,26 @@ class Mary9Optimizer:
             update_to,
             update_popsize,
             update_strategy,
-            update_threshold
+            update_threshold,
+            only_if_new_best_point: bool = True
     ):
+        # first check, whether updating makes sense at all
+        if only_if_new_best_point:
+            fittest_old = np.nanmin(update_to.get_fitness())
+            fittest_new = np.nanmin(update_from.get_fitness())
+            if not fittest_new < fittest_old:
+                self.logger.debug(f'  None of the {update_popsize} possible '
+                                  'points exchanged, as no new best point was '
+                                  'found.')
+                return
+
         # select best points from new population
         suggested_points, selection_info = \
             Sampler.select_subsample(
                 proposal=update_from,
                 n_samples=update_popsize,
                 strategy=update_strategy, #(.2, .2, .6, .0),
-                ban_distance=2. / update_from.popsize
+                ban_distance=.25 / update_from.popsize
             )
 
         # Now select weakest point from old population
@@ -483,8 +513,10 @@ class Mary9Optimizer:
                 n_samples=update_popsize,
             )
 
+        # TODO: We need to enusure that not the same point is exchanged twice!!!
+        # Otherwise, always the same points will be duplicated!!!
+        # Need some "exclude" functionality in the select subsample routine!!!
         # Now try to exchange points, if possible
-        fittest_old = np.nanmin(update_to.get_fitness())
         good_value_old = np.nanpercentile(update_to.get_fitness(), q=5)
         points_exchanged = 0
         for i_vector, _ in enumerate(suggested_points):
@@ -504,9 +536,18 @@ class Mary9Optimizer:
                 threshold = good_value_old
             else:
                 raise Exception('Unknown thresholding for knowledge exchange.')
+
+            # is the new sample good enough to update?
             if individual_new.fitness < threshold:
-                update_to.individuals[id_old] = individual_new
-                points_exchanged += 1
+                point_already_in_population = False
+                for tmp_ind_old in update_to:
+                    if np.linalg.norm(individual_new.x - tmp_ind_old.x) < 1e-4:
+                        point_already_in_population = True
+                        break
+
+                if not point_already_in_population:
+                    update_to.individuals[id_old] = deepcopy(individual_new)
+                    points_exchanged += 1
 
         self.logger.debug(f'  Exchanged {points_exchanged} of '
                           f'{update_popsize} possible points.')
@@ -521,7 +562,7 @@ class Mary9Optimizer:
             proposal=self.final_population,
             n_samples=self.n_local_searches,
             strategy=(.3, .3, .3, .1),
-            ban_distance=.1 / self.final_population.popsize
+            ban_distance=1. / self.final_population.popsize
         )
 
         final_results = []

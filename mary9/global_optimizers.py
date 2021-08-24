@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Callable, Sequence
+from copy import deepcopy
 
 from .population import Population
 from .util import (
@@ -45,7 +46,7 @@ class CMAESWrapper:
             self.population.get_fitness()
         )
         # get solutions candidates from CMAES
-        self.population.set_parameters(self.strategy.ask())
+        self.population.set_parameters(deepcopy(self.strategy.ask()))
         for ix, x in enumerate(self.population.get_parameters()):
             self.population.set_single_fitness(ix, self.objective_function(x))
 
@@ -82,7 +83,15 @@ class DiffEvolWrapper:
         self.solver._promote_lowest_energy()
 
     def __next__(self):
+        # update solver from population
+        self.solver.population = np.array(self.population.get_parameters())
+        population_fitness = self.population.get_fitness()
+        population_feasibility = np.isfinite(population_fitness)
+        self.solver.feasible = population_feasibility
+        self.solver.population_energies = np.array(population_fitness)
+        self.solver._promote_lowest_energy()
         next(self.solver)
+        # update population from solver
         self.population.set_parameters(list(self.solver.population))
         self.population.set_fitness(list(self.solver.population_energies))
 
@@ -102,7 +111,7 @@ class InitialRefiner:
         self.local_optimizer = FidesWrapper(
             lower_bounds=lower_bounds.flatten(),
             upper_bounds=upper_bounds.flatten(),
-            options={'maxiter': 15},
+            options={'maxiter': 20},
         )
         self.results = []
 
