@@ -1,0 +1,5 @@
+# python created directories
+.idea*
+*pycache*
+
+
